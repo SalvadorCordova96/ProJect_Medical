@@ -8,14 +8,18 @@
 #   - Los routers de cada módulo
 #   - Middleware global
 #   - Logging mejorado
+#   - Rate limiting (protección contra abuso)
 #
 # PARA EJECUTAR LA API:
 # cd backend
 # uvicorn api.app:app --reload --host 0.0.0.0 --port 8000 --log-config backend/config/logging_config.py
 # =============================================================================
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from backend.api.core.config import get_settings
 from backend.config.logging_config import setup_logging
@@ -37,12 +41,21 @@ from backend.api.routes import examples_schemas
 from backend.api.routes import finance
 from backend.api.routes import historial_detalles
 from backend.api.routes import chat
+from backend.api.routes import statistics
+from backend.api.routes import notifications
 
 
 # =============================================================================
 # CONFIGURACIÓN
 # =============================================================================
 settings = get_settings()
+
+# =============================================================================
+# RATE LIMITING
+# =============================================================================
+# Configure rate limiter to prevent API abuse
+# Uses IP address as identifier
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
 # =============================================================================
@@ -73,10 +86,19 @@ app = FastAPI(
     1. Hacer POST a `/auth/login` con username y password
     2. Copiar el `access_token` de la respuesta
     3. Usar el token en el header: `Authorization: Bearer {token}`
+    
+    ### Rate Limiting:
+    - Default: 200 requests/minute per IP
+    - Auth endpoints: 5 requests/minute per IP
+    - Search endpoints: 30 requests/minute per IP
     """,
     docs_url="/docs",      # Swagger UI en /docs
     redoc_url="/redoc",    # ReDoc en /redoc
 )
+
+# Add rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # =============================================================================
@@ -141,6 +163,10 @@ app.include_router(finance.router, prefix="/api/v1")
 app.include_router(historial_detalles.router, prefix="/api/v1")
 # Chat - Agente IA LangGraph
 app.include_router(chat.router, prefix="/api/v1")
+# Statistics - Aggregated dashboard and metrics
+app.include_router(statistics.router, prefix="/api/v1")
+# Notifications - Email/SMS reminders
+app.include_router(notifications.router, prefix="/api/v1")
 
 
 # =============================================================================

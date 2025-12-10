@@ -14,6 +14,17 @@ python-multipart==0.0.9
 # ===== AUTENTICACIÓN =====
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+argon2-cffi==23.1.0
+
+# ===== RATE LIMITING =====
+slowapi==0.1.9
+
+# ===== PDF GENERATION =====
+reportlab==4.2.5
+
+# ===== EMAIL NOTIFICATIONS =====
+aiosmtplib==3.0.2
+jinja2==3.1.4
 
 
 # ===== BASE DE DATOS =====
