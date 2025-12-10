@@ -20,6 +20,7 @@
 from typing import List, Optional
 from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from pydantic import BaseModel, Field, EmailStr
@@ -34,7 +35,8 @@ from backend.api.deps.permissions import (
     filter_paciente_for_recepcion
 )
 from backend.schemas.auth.models import SysUsuario
-from backend.schemas.core.models import Paciente, HistorialMedicoGeneral, HistorialGineco
+from backend.schemas.core.models import Paciente, HistorialMedicoGeneral, HistorialGineco, Tratamiento, EvolucionClinica
+from backend.api.utils.pdf_export import generate_patient_pdf
 
 
 # =============================================================================
@@ -458,3 +460,97 @@ async def purge_paciente(
         "id": paciente_id,
         "warning": "Esta acción no se puede deshacer"
     }
+
+
+# =============================================================================
+# ENDPOINT: GET /pacientes/{id}/export-pdf
+# =============================================================================
+
+@router.get("/{paciente_id}/export-pdf")
+async def export_patient_pdf(
+    paciente_id: int,
+    include_treatments: bool = Query(True, description="Incluir tratamientos"),
+    include_notes: bool = Query(True, description="Incluir notas clínicas"),
+    current_user: SysUsuario = Depends(require_role(CLINICAL_ROLES)),
+    db: Session = Depends(get_core_db)
+):
+    """
+    Exporta el expediente completo del paciente a PDF.
+    
+    **Permisos:** Solo Admin y Podologo
+    
+    **Parámetros:**
+    - include_treatments: Incluir tratamientos en el PDF
+    - include_notes: Incluir notas clínicas (evoluciones)
+    
+    **Retorna:** Archivo PDF descargable
+    
+    El PDF incluye:
+    - Datos demográficos del paciente
+    - Tratamientos (opcional)
+    - Notas clínicas SOAP (opcional)
+    
+    **Ejemplo:**
+    ```
+    GET /api/v1/pacientes/1/export-pdf?include_treatments=true&include_notes=true
+    ```
+    """
+    # Buscar paciente
+    paciente = db.query(Paciente).filter(
+        Paciente.id_paciente == paciente_id,
+        Paciente.deleted_at.is_(None)
+    ).first()
+    
+    if not paciente:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Paciente no encontrado"
+        )
+    
+    # Verificar clínica
+    if current_user.clinica_id and paciente.id_clinica != current_user.clinica_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a este paciente"
+        )
+    
+    # Obtener tratamientos si se solicita
+    tratamientos = None
+    if include_treatments:
+        tratamientos = db.query(Tratamiento).filter(
+            Tratamiento.paciente_id == paciente_id
+        ).order_by(Tratamiento.fecha_inicio.desc()).all()
+    
+    # Obtener evoluciones si se solicita
+    evoluciones = None
+    if include_notes and tratamientos:
+        # Get all evolutions from all treatments
+        tratamiento_ids = [t.id_tratamiento for t in tratamientos]
+        evoluciones = db.query(EvolucionClinica).filter(
+            EvolucionClinica.tratamiento_id.in_(tratamiento_ids)
+        ).order_by(EvolucionClinica.fecha_sesion.desc()).all()
+    
+    # Generate PDF
+    try:
+        pdf_buffer = generate_patient_pdf(
+            paciente=paciente,
+            tratamientos=tratamientos,
+            evoluciones=evoluciones,
+            include_photos=False  # Photos not implemented yet
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generando PDF: {str(e)}"
+        )
+    
+    # Return as streaming response
+    filename = f"expediente_paciente_{paciente_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )

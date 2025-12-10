@@ -19,6 +19,9 @@ argon2-cffi==23.1.0
 # ===== RATE LIMITING =====
 slowapi==0.1.9
 
+# ===== PDF GENERATION =====
+reportlab==4.2.5
+
 
 # ===== BASE DE DATOS =====
 sqlalchemy==2.0.44

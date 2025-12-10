@@ -41,6 +41,7 @@ from backend.api.routes import examples_schemas
 from backend.api.routes import finance
 from backend.api.routes import historial_detalles
 from backend.api.routes import chat
+from backend.api.routes import statistics
 
 
 # =============================================================================
@@ -161,6 +162,8 @@ app.include_router(finance.router, prefix="/api/v1")
 app.include_router(historial_detalles.router, prefix="/api/v1")
 # Chat - Agente IA LangGraph
 app.include_router(chat.router, prefix="/api/v1")
+# Statistics - Aggregated dashboard and metrics
+app.include_router(statistics.router, prefix="/api/v1")
 
 
 # =============================================================================
