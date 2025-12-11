@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 import base64
 import os
+import uuid
 
 from backend.api.deps.database import get_core_db
 from backend.api.deps.permissions import require_role, CLINICAL_ROLES
@@ -428,10 +429,21 @@ async def upload_evidencia(
             detail="El archivo no es una imagen válida (verificación de firma de archivo falló)"
         )
     
-    # Generar nombre único para el archivo
+    # Generar nombre único para el archivo usando UUID (evita path traversal)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    extension = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-    filename = f"evidencia_{evolucion_id}_{timestamp}.{extension}"
+    # Extraer extensión de manera segura
+    original_extension = "jpg"  # Default
+    if "." in file.filename:
+        # Tomar solo la última parte y sanitizar
+        ext_candidate = file.filename.split(".")[-1].lower()
+        # Solo permitir extensiones de imagen conocidas
+        allowed_extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
+        if ext_candidate in allowed_extensions:
+            original_extension = ext_candidate
+    
+    # Usar UUID para el nombre del archivo (previene path traversal completamente)
+    unique_id = uuid.uuid4().hex[:12]
+    filename = f"evidencia_{evolucion_id}_{timestamp}_{unique_id}.{original_extension}"
     
     # Directorio de uploads (crear si no existe)
     upload_dir = os.path.join("uploads", "evidencias")
