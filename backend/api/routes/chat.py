@@ -10,8 +10,10 @@ import logging
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from backend.api.deps.auth import get_current_active_user
 from backend.schemas.auth.models import SysUsuario
@@ -19,6 +21,9 @@ from backend.agents.graph import run_agent
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["Chat - Agente IA"])
+
+# Rate limiter for chat endpoint to protect Anthropic API costs
+limiter = Limiter(key_func=get_remote_address)
 
 
 # =============================================================================
@@ -85,11 +90,15 @@ class ChatResponse(BaseModel):
     - Usa thread_id para mantener contexto entre turnos de conversación
     - El frontend debe enviar el mismo thread_id para continuar una conversación
     
+    **Rate Limiting:** 30 requests/minute per IP para proteger costos de API de IA.
+    
     **Requiere autenticación.** Los resultados se filtran según el rol del usuario.
     """,
 )
+@limiter.limit("30/minute")  # Rate limit: 30 chat requests per minute per IP
 async def chat(
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     current_user: SysUsuario = Depends(get_current_active_user),
 ):
     """
@@ -102,16 +111,16 @@ async def chat(
     
     logger.info(
         f"Chat request from user {current_user.id_usuario} ({current_user.rol}): "
-        f"{request.message[:50]}... (thread={request.thread_id})"
+        f"{chat_request.message[:50]}... (thread={chat_request.thread_id})"
     )
     
     try:
         result = await run_agent(
-            user_query=request.message,
+            user_query=chat_request.message,
             user_id=current_user.id_usuario,
             user_role=current_user.rol,
-            session_id=request.session_id,
-            thread_id=request.thread_id,  # ✅ NUEVO: Pasar thread_id para checkpointing
+            session_id=chat_request.session_id,
+            thread_id=chat_request.thread_id,  # ✅ NUEVO: Pasar thread_id para checkpointing
             origin="webapp",
         )
         
@@ -136,8 +145,8 @@ async def chat(
             message="🔧 Ocurrió un error procesando tu consulta. Por favor intenta de nuevo.",
             data=None,
             intent=None,
-            session_id=request.session_id or "",
-            thread_id=request.thread_id,  # ✅ NUEVO: Mantener thread_id en error
+            session_id=chat_request.session_id or "",
+            thread_id=chat_request.thread_id,  # ✅ NUEVO: Mantener thread_id en error
             processing_time_ms=round(processing_time, 2),
         )
 

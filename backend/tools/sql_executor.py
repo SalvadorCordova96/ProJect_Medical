@@ -125,6 +125,7 @@ def validate_query_safety(sql: str, user_role: str) -> Tuple[bool, Optional[str]
         Tuple (es_valida, mensaje_error)
     """
     sql_upper = sql.upper().strip()
+    sql_lower = sql.lower()
     
     # 1. Verificar palabras clave prohibidas
     for keyword in FORBIDDEN_KEYWORDS:
@@ -135,15 +136,38 @@ def validate_query_safety(sql: str, user_role: str) -> Tuple[bool, Optional[str]
     if not sql_upper.startswith("SELECT"):
         return False, "Solo se permiten consultas de lectura (SELECT)"
     
-    # 3. Verificar acceso a tablas sensibles
-    sql_lower = sql.lower()
+    # 3. Verificar que no haya múltiples statements (evitar SQL injection con ;)
+    # Remover strings entre comillas para evitar falsos positivos
+    cleaned_sql = re.sub(r"'[^']*'", "", sql)
+    cleaned_sql = re.sub(r'"[^"]*"', "", cleaned_sql)
+    if ";" in cleaned_sql:
+        return False, "No se permiten múltiples statements SQL"
+    
+    # 4. Detectar intentos de UNION-based SQL injection
+    # UNION debe estar precedido por paréntesis de cierre válido o ser parte de una subconsulta legítima
+    if "union" in sql_lower:
+        # Búsqueda simplificada: buscar patrones sospechosos de UNION injection
+        # Patrón típico: UNION SELECT sin subconsulta apropiada
+        union_pattern = r'\)\s*union\s+select|union\s+select\s+[^(]*from'
+        if re.search(union_pattern, sql_lower, re.IGNORECASE):
+            return False, "Patrón sospechoso de SQL injection detectado (UNION)"
+    
+    # 5. Verificar acceso a tablas sensibles
     for table, allowed_roles in SENSITIVE_TABLES.items():
         if table in sql_lower and user_role not in allowed_roles:
             return False, f"Sin permisos para acceder a {table}"
     
-    # 4. Verificar que no haya subqueries peligrosas
-    if "into" in sql_lower or "outfile" in sql_lower:
-        return False, "Cláusulas INTO/OUTFILE no permitidas"
+    # 6. Verificar que no haya cláusulas peligrosas
+    dangerous_clauses = ["into outfile", "into dumpfile", "load_file", "exec(", "execute("]
+    for clause in dangerous_clauses:
+        if clause in sql_lower:
+            return False, f"Cláusula no permitida: {clause}"
+    
+    # 7. Detectar intentos de acceso a funciones del sistema
+    system_functions = ["pg_read_file", "pg_ls_dir", "pg_stat_file", "copy"]
+    for func in system_functions:
+        if func in sql_lower:
+            return False, f"Función de sistema no permitida: {func}"
     
     return True, None
 

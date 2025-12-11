@@ -18,17 +18,19 @@
 # - Password migration: Automatic upgrade from bcrypt to Argon2
 # =============================================================================
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+import re
 
 from backend.api.deps.database import get_auth_db
 from backend.api.deps.auth import get_current_active_user
 from backend.api.core.security import create_access_token, Token
+from backend.api.core.config import get_settings
 from backend.schemas.auth.models import SysUsuario, AuditLog
 from backend.schemas.auth.auth_utils import verify_password, hash_password, needs_rehash
 
@@ -52,6 +54,35 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=8, description="Contraseña")
 
 
+def validate_password_complexity(password: str) -> str:
+    """
+    Valida que la contraseña cumpla con requisitos de complejidad.
+    
+    Requisitos:
+    - Al menos 8 caracteres
+    - Al menos una letra mayúscula
+    - Al menos una letra minúscula
+    - Al menos un número
+    - Al menos un carácter especial (!@#$%^&*()_+-=[]{}|;:,.<>?)
+    """
+    if len(password) < 8:
+        raise ValueError("La contraseña debe tener al menos 8 caracteres")
+    
+    if not re.search(r'[A-Z]', password):
+        raise ValueError("La contraseña debe contener al menos una letra mayúscula")
+    
+    if not re.search(r'[a-z]', password):
+        raise ValueError("La contraseña debe contener al menos una letra minúscula")
+    
+    if not re.search(r'\d', password):
+        raise ValueError("La contraseña debe contener al menos un número")
+    
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]', password):
+        raise ValueError("La contraseña debe contener al menos un carácter especial (!@#$%^&*()_+-=[]{}|;:,.<>?)")
+    
+    return password
+
+
 class UserProfile(BaseModel):
     """Perfil del usuario actual (respuesta de /auth/me)"""
     id_usuario: int
@@ -70,6 +101,12 @@ class ChangePasswordRequest(BaseModel):
     """Request para cambiar contraseña"""
     current_password: str = Field(..., min_length=8, description="Contraseña actual")
     new_password: str = Field(..., min_length=8, description="Nueva contraseña (mínimo 8 caracteres)")
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        """Valida complejidad de la nueva contraseña"""
+        return validate_password_complexity(v)
 
 
 class ChangePasswordResponse(BaseModel):
@@ -121,39 +158,76 @@ async def login(
     """
     # Extraer IP del cliente
     client_ip = request.client.host if request.client else None
+    settings = get_settings()
     
     # 1. Buscar usuario por nombre de usuario
     user = db.query(SysUsuario).filter(
         SysUsuario.nombre_usuario == credentials.username
     ).first()
     
-    # 2. Verificar que el usuario existe y contraseña correcta
-    if not user or not verify_password(credentials.password, user.password_hash):
+    # 2. Verificar que el usuario existe
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # 3. Verificar que el usuario esté activo
+    # 3. Verificar si la cuenta está bloqueada
+    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        minutes_remaining = int((user.locked_until - datetime.now(timezone.utc)).total_seconds() / 60)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Cuenta bloqueada por múltiples intentos fallidos. Intente de nuevo en {minutes_remaining} minutos."
+        )
+    
+    # 4. Si el bloqueo ha expirado, resetear el contador
+    if user.locked_until and user.locked_until <= datetime.now(timezone.utc):
+        user.locked_until = None
+        user.failed_login_attempts = 0
+    
+    # 5. Verificar contraseña
+    if not verify_password(credentials.password, user.password_hash):
+        # Incrementar contador de intentos fallidos
+        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+        
+        # Bloquear cuenta si se alcanzó el máximo de intentos
+        if user.failed_login_attempts >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
+            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCOUNT_LOCKOUT_MINUTES)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Cuenta bloqueada por {settings.ACCOUNT_LOCKOUT_MINUTES} minutos debido a múltiples intentos fallidos."
+            )
+        
+        db.commit()
+        
+        attempts_remaining = settings.MAX_FAILED_LOGIN_ATTEMPTS - user.failed_login_attempts
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Credenciales inválidas. Intentos restantes: {attempts_remaining}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 6. Verificar que el usuario esté activo
     if not user.activo:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario desactivado. Contacte al administrador."
         )
     
-    # 4. Migrate password from bcrypt to Argon2 if needed (transparent upgrade)
+    # 7. Migrate password from bcrypt to Argon2 if needed (transparent upgrade)
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(credentials.password)
     
-    # 5. Actualizar último login
+    # 8. Actualizar último login y resetear contador de intentos fallidos
     user.last_login = datetime.now(timezone.utc)
-    if hasattr(user, 'failed_login_attempts'):
-        user.failed_login_attempts = 0
+    user.failed_login_attempts = 0
+    user.locked_until = None
     
     db.commit()
     
-    # 6. Crear token JWT con datos del usuario
+    # 9. Crear token JWT con datos del usuario
     access_token = create_access_token(
         data={
             "user_id": user.id_usuario,

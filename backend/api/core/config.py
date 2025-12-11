@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # En producción, limitar a los dominios específicos del frontend
     CORS_ORIGINS: str = "*"
     
+    # ========== Account Security ==========
+    # Account lockout after failed login attempts
+    MAX_FAILED_LOGIN_ATTEMPTS: int = 5
+    ACCOUNT_LOCKOUT_MINUTES: int = 15  # Lock account for 15 minutes after max attempts
+    
     # ========== LangGraph Agent - LLM Configuration ==========
     # Anthropic Claude Haiku 3.5 para el agente conversacional
     ANTHROPIC_API_KEY: str = ""  # REQUERIDO: Configurar en .env
