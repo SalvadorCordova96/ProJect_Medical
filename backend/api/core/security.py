@@ -23,6 +23,10 @@ from jose import jwt, JWTError
 from pydantic import BaseModel
 
 from backend.api.core.config import get_settings
+from backend.schemas.auth.auth_utils import hash_password, verify_password
+
+# Alias para mantener compatibilidad con código existente
+get_password_hash = hash_password
 
 
 # Obtenemos la configuración una sola vez

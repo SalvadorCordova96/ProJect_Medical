@@ -23,7 +23,7 @@ from .llm_response_node import LlmResponseNode, generate_response
 
 # Nodos opcionales (deshabilitados por defecto)
 from .vector_context_node import VectorContextNode
-from .combine_context_node import CombineContextNode
+from .combine_context_node import CombineContextNode, combine_context
 
 __all__ = [
     # Clases de nodos (wrappers)
@@ -40,4 +40,5 @@ __all__ = [
     "generate_sql",
     "execute_sql",
     "generate_response",
+    "combine_context",
 ]

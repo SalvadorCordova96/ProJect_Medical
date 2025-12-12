@@ -14,9 +14,11 @@ import pytest
 import asyncio
 from typing import Generator, Dict, Any
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.dialects.postgresql import JSONB, INET
+from sqlalchemy import JSON, String, TypeDecorator
 
 # Importar la app FastAPI
 from backend.api.app import app
@@ -25,6 +27,7 @@ from backend.api.app import app
 from backend.schemas.auth.models import Base as AuthBase, SysUsuario, Clinica
 from backend.schemas.core.models import Base as CoreBase, Paciente
 from backend.schemas.ops.models import Base as OpsBase, Podologo, Cita
+from backend.schemas.finance.models import Base as FinanceBase
 
 # Importar dependencias
 from backend.api.deps.database import get_auth_db, get_core_db, get_ops_db
@@ -35,15 +38,16 @@ from backend.api.core.security import create_access_token, get_password_hash
 # CONFIGURACIÓN DE BASES DE DATOS DE PRUEBA
 # =============================================================================
 
-# URLs de bases de datos de prueba (usar SQLite en memoria para tests rápidos)
-TEST_AUTH_DB_URL = "sqlite:///:memory:"
-TEST_CORE_DB_URL = "sqlite:///:memory:"
-TEST_OPS_DB_URL = "sqlite:///:memory:"
+# ✅ Usando las bases de datos PostgreSQL del Docker Compose
+# Los tests usarán las mismas BDs que desarrollo (docker-compose.yml)
+TEST_AUTH_DB_URL = "postgresql://podoskin:podoskin123@localhost:5432/clinica_auth_db"
+TEST_CORE_DB_URL = "postgresql://podoskin:podoskin123@localhost:5432/clinica_core_db"
+TEST_OPS_DB_URL = "postgresql://podoskin:podoskin123@localhost:5432/clinica_ops_db"
 
-# Alternativamente, usar PostgreSQL de prueba si está disponible
-# TEST_AUTH_DB_URL = "postgresql://podoskin:podoskin123@localhost:5432/test_auth_db"
-# TEST_CORE_DB_URL = "postgresql://podoskin:podoskin123@localhost:5432/test_core_db"
-# TEST_OPS_DB_URL = "postgresql://podoskin:podoskin123@localhost:5432/test_ops_db"
+# Nota: Los tests crearán/eliminarán tablas en cada ejecución
+# Si prefieres usar BDs separadas para tests, crea:
+# - test_auth_db, test_core_db, test_ops_db en PostgreSQL
+# y actualiza las URLs arriba
 
 
 # =============================================================================
@@ -56,16 +60,35 @@ def auth_engine():
     engine = create_engine(
         TEST_AUTH_DB_URL,
         connect_args={"check_same_thread": False} if "sqlite" in TEST_AUTH_DB_URL else {},
-        poolclass=StaticPool,
+        poolclass=StaticPool if "sqlite" in TEST_AUTH_DB_URL else None,
     )
+    
+    # Limpiar ANTES de crear (importante para tests repetidos)
+    if "postgresql" in TEST_AUTH_DB_URL:
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {AuthBase.metadata.schema} CASCADE"))
+            conn.execute(text(f"CREATE SCHEMA {AuthBase.metadata.schema}"))
     
     # Crear todas las tablas
     AuthBase.metadata.create_all(bind=engine)
     
     yield engine
     
-    # Limpiar
-    AuthBase.metadata.drop_all(bind=engine)
+    # Limpiar después del test
+    if "postgresql" in TEST_AUTH_DB_URL:
+        with engine.begin() as conn:
+            # Truncate todas las tablas para limpiar datos Y secuencias
+            conn.execute(text(f"""
+                DO $$ DECLARE
+                    r RECORD;
+                BEGIN
+                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = '{AuthBase.metadata.schema}') LOOP
+                        EXECUTE 'TRUNCATE TABLE {AuthBase.metadata.schema}.' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+                    END LOOP;
+                END $$;
+            """))
+    else:
+        AuthBase.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -75,16 +98,27 @@ def core_engine():
     engine = create_engine(
         TEST_CORE_DB_URL,
         connect_args={"check_same_thread": False} if "sqlite" in TEST_CORE_DB_URL else {},
-        poolclass=StaticPool,
+        poolclass=StaticPool if "sqlite" in TEST_CORE_DB_URL else None,
     )
+    
+    # Limpiar ANTES de crear (importante para tests repetidos)
+    if "postgresql" in TEST_CORE_DB_URL:
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {CoreBase.metadata.schema} CASCADE"))
+            conn.execute(text(f"CREATE SCHEMA {CoreBase.metadata.schema}"))
     
     # Crear todas las tablas
     CoreBase.metadata.create_all(bind=engine)
     
     yield engine
     
-    # Limpiar
-    CoreBase.metadata.drop_all(bind=engine)
+    # Limpiar después del test
+    if "postgresql" in TEST_CORE_DB_URL:
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {CoreBase.metadata.schema} CASCADE"))
+            conn.execute(text(f"CREATE SCHEMA {CoreBase.metadata.schema}"))
+    else:
+        CoreBase.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -94,16 +128,33 @@ def ops_engine():
     engine = create_engine(
         TEST_OPS_DB_URL,
         connect_args={"check_same_thread": False} if "sqlite" in TEST_OPS_DB_URL else {},
-        poolclass=StaticPool,
+        poolclass=StaticPool if "sqlite" in TEST_OPS_DB_URL else None,
     )
+    
+    # Limpiar ANTES de crear (importante para tests repetidos)
+    if "postgresql" in TEST_OPS_DB_URL:
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {OpsBase.metadata.schema} CASCADE"))
+            conn.execute(text(f"CREATE SCHEMA {OpsBase.metadata.schema}"))
+            if hasattr(FinanceBase.metadata, 'schema') and FinanceBase.metadata.schema:
+                conn.execute(text(f"DROP SCHEMA IF EXISTS {FinanceBase.metadata.schema} CASCADE"))
+                conn.execute(text(f"CREATE SCHEMA {FinanceBase.metadata.schema}"))
     
     # Crear todas las tablas
     OpsBase.metadata.create_all(bind=engine)
     
     yield engine
     
-    # Limpiar
-    OpsBase.metadata.drop_all(bind=engine)
+    # Limpiar después del test
+    if "postgresql" in TEST_OPS_DB_URL:
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {OpsBase.metadata.schema} CASCADE"))
+            conn.execute(text(f"CREATE SCHEMA {OpsBase.metadata.schema}"))
+            if hasattr(FinanceBase.metadata, 'schema') and FinanceBase.metadata.schema:
+                conn.execute(text(f"DROP SCHEMA IF EXISTS {FinanceBase.metadata.schema} CASCADE"))
+                conn.execute(text(f"CREATE SCHEMA {FinanceBase.metadata.schema}"))
+    else:
+        OpsBase.metadata.drop_all(bind=engine)
     engine.dispose()
 
 
@@ -208,57 +259,60 @@ def test_clinica(auth_db) -> Clinica:
 @pytest.fixture
 def test_admin_user(auth_db, test_clinica) -> SysUsuario:
     """Usuario administrador de prueba."""
-    user = SysUsuario(
-        nombre_usuario="admin_test",
-        email="admin@test.com",
-        nombre="Admin",
-        apellidos="Test",
-        password_hash=get_password_hash("admin123"),
-        rol="Admin",
-        activo=True,
-        clinica_id=test_clinica.id_clinica
-    )
-    auth_db.add(user)
-    auth_db.commit()
-    auth_db.refresh(user)
+    # Get-or-create pattern para evitar duplicados
+    user = auth_db.query(SysUsuario).filter_by(nombre_usuario="admin_test").first()
+    if not user:
+        user = SysUsuario(
+            nombre_usuario="admin_test",
+            email="admin@test.com",
+            password_hash=get_password_hash("admin123"),
+            rol="Admin",
+            activo=True,
+            clinica_id=test_clinica.id_clinica
+        )
+        auth_db.add(user)
+        auth_db.commit()
+        auth_db.refresh(user)
     return user
 
 
 @pytest.fixture
 def test_podologo_user(auth_db, test_clinica) -> SysUsuario:
     """Usuario podólogo de prueba."""
-    user = SysUsuario(
-        nombre_usuario="podologo_test",
-        email="podologo@test.com",
-        nombre="Juan",
-        apellidos="Podólogo",
-        password_hash=get_password_hash("podo123"),
-        rol="Podologo",
-        activo=True,
-        clinica_id=test_clinica.id_clinica
-    )
-    auth_db.add(user)
-    auth_db.commit()
-    auth_db.refresh(user)
+    # Get-or-create pattern para evitar duplicados
+    user = auth_db.query(SysUsuario).filter_by(nombre_usuario="podologo_test").first()
+    if not user:
+        user = SysUsuario(
+            nombre_usuario="podologo_test",
+            email="podologo@test.com",
+            password_hash=get_password_hash("podo123"),
+            rol="Podologo",
+            activo=True,
+            clinica_id=test_clinica.id_clinica
+        )
+        auth_db.add(user)
+        auth_db.commit()
+        auth_db.refresh(user)
     return user
 
 
 @pytest.fixture
 def test_recepcion_user(auth_db, test_clinica) -> SysUsuario:
     """Usuario recepcionista de prueba."""
-    user = SysUsuario(
-        nombre_usuario="recepcion_test",
-        email="recepcion@test.com",
-        nombre="María",
-        apellidos="Recepción",
-        password_hash=get_password_hash("recep123"),
-        rol="Recepcion",
-        activo=True,
-        clinica_id=test_clinica.id_clinica
-    )
-    auth_db.add(user)
-    auth_db.commit()
-    auth_db.refresh(user)
+    # Get-or-create pattern para evitar duplicados
+    user = auth_db.query(SysUsuario).filter_by(nombre_usuario="recepcion_test").first()
+    if not user:
+        user = SysUsuario(
+            nombre_usuario="recepcion_test",
+            email="recepcion@test.com",
+            password_hash=get_password_hash("recep123"),
+            rol="Recepcion",
+            activo=True,
+            clinica_id=test_clinica.id_clinica
+        )
+        auth_db.add(user)
+        auth_db.commit()
+        auth_db.refresh(user)
     return user
 
 

@@ -121,16 +121,17 @@ def build_whatsapp_user_subgraph() -> StateGraph:
         classify_intent,
         check_permissions,
         combine_context,
-        nl_to_sql,
-        sql_exec,
+        generate_sql,
+        execute_sql,
+        generate_response,
     )
     
     # Agregar nodos del flujo
     subgraph.add_node("classify_intent", classify_intent)
     subgraph.add_node("check_permissions", check_permissions)
     subgraph.add_node("combine_context", combine_context)
-    subgraph.add_node("nl_to_sql", nl_to_sql)
-    subgraph.add_node("sql_exec", sql_exec)
+    subgraph.add_node("generate_sql", generate_sql)
+    subgraph.add_node("execute_sql", execute_sql)
     subgraph.add_node("format_whatsapp_response", format_whatsapp_response)
     
     # Definir punto de entrada
@@ -139,9 +140,9 @@ def build_whatsapp_user_subgraph() -> StateGraph:
     # Flujo lineal con formato especial al final
     subgraph.add_edge("classify_intent", "check_permissions")
     subgraph.add_edge("check_permissions", "combine_context")
-    subgraph.add_edge("combine_context", "nl_to_sql")
-    subgraph.add_edge("nl_to_sql", "sql_exec")
-    subgraph.add_edge("sql_exec", "format_whatsapp_response")
+    subgraph.add_edge("combine_context", "generate_sql")
+    subgraph.add_edge("generate_sql", "execute_sql")
+    subgraph.add_edge("execute_sql", "format_whatsapp_response")
     subgraph.add_edge("format_whatsapp_response", END)
     
     logger.info("✅ Subgrafo WhatsApp Usuario construido correctamente")

@@ -11,7 +11,7 @@ class ClinicaRead(BaseModel):
     created_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ClinicaCreate(BaseModel):
     nombre: str
@@ -35,7 +35,7 @@ class SysUsuarioRead(BaseModel):
     created_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class AuditLogRead(BaseModel):
     id_log: int
@@ -57,7 +57,7 @@ class AuditLogRead(BaseModel):
     note: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class VoiceTranscriptCreate(BaseModel):
@@ -81,4 +81,4 @@ class VoiceTranscriptRead(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True

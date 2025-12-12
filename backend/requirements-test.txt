@@ -13,7 +13,7 @@ faker==33.1.0
 factory-boy==3.3.1
 
 # ===== HTTP TESTING =====
-httpx==0.28.1  # Ya está en requirements.txt pero necesario para tests
+httpx==0.27.2  # Ya está en requirements.txt pero necesario para tests
 
 # ===== DATABASE TESTING =====
 pytest-postgresql==6.1.1

@@ -85,3 +85,24 @@ class CombineContextNode:
         
         state["node_path"] = state.get("node_path", []) + ["combine_context"]
         return state
+
+
+# =============================================================================
+# FUNCIÓN DE NODO PARA USAR EN GRAFO
+# =============================================================================
+
+def combine_context(state: AgentState) -> AgentState:
+    """
+    Función de nodo para combinar contextos.
+    
+    Esta función envuelve la clase CombineContextNode para uso directo
+    en el grafo de LangGraph.
+    
+    Args:
+        state: Estado actual del agente
+        
+    Returns:
+        Estado actualizado con contextos combinados
+    """
+    node = CombineContextNode()
+    return node(state)

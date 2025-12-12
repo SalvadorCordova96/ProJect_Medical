@@ -24,7 +24,8 @@ from backend.api.deps.database import get_core_db, get_ops_db, get_auth_db
 from backend.api.deps.permissions import require_role, CLINICAL_ROLES, ROLE_ADMIN
 from backend.schemas.auth.models import SysUsuario
 from backend.schemas.core.models import Paciente, Tratamiento, EvolucionClinica, EvidenciaFotografica
-from backend.schemas.ops.models import Cita, Podologo, Transaccion, Gasto
+from backend.schemas.ops.models import Cita, Podologo
+from backend.schemas.finance.models import Transaccion, Gasto
 
 
 # =============================================================================

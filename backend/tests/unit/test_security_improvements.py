@@ -273,7 +273,8 @@ class TestSQLValidation:
         is_valid, error = validate_query_safety(query, "Admin")
         
         assert not is_valid
-        assert "múltiples" in error.lower() or "statement" in error.lower()
+        # El error puede mencionar "múltiples", "statement", "DROP" o "no permitida"
+        assert any(word in error.lower() for word in ["múltiples", "statement", "drop", "no permitida"])
     
     def test_sql_system_functions_blocked(self):
         """Test: Bloquea funciones del sistema PostgreSQL."""

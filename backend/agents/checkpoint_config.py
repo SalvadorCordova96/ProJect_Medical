@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import Connection
+from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,19 @@ def get_checkpointer() -> PostgresSaver:
         try:
             # Crear checkpointer con conexión a AUTH_DB
             # LangGraph usará esta BD para almacenar estados de conversación
-            _checkpointer_instance = PostgresSaver.from_conn_string(
-                settings.AUTH_DB_URL
-            )
+            conn_string = settings.AUTH_DB_URL
+            
+            # El from_conn_string devuelve un context manager, no el saver directamente
+            # Necesitamos crear la conexión y luego el saver
+            from psycopg_pool import ConnectionPool
+            
+            # Crear un pool de conexiones persistente
+            pool = ConnectionPool(conn_string, min_size=1, max_size=5)
+            
+            # Crear el saver con la conexión
+            _checkpointer_instance = PostgresSaver(pool)
             
             # Setup: Crear tabla de checkpoints si no existe
-            # Esto debe llamarse una vez al iniciar la aplicación
             _checkpointer_instance.setup()
             
             logger.info(

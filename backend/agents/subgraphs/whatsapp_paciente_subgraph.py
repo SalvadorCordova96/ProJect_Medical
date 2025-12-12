@@ -115,14 +115,14 @@ def generate_patient_safe_response(state: AgentState) -> AgentState:
     logger.info(f"💬 Generando respuesta para paciente")
     
     # Importar solo cuando se necesita
-    from backend.agents.nodes.llm_response_node import llm_response
+    from backend.agents.nodes.llm_response_node import generate_response
     
     # Agregar contexto de que la respuesta es para un paciente
     state["response_context"] = "patient_facing"
     state["response_tone"] = "friendly_non_technical"
     
     # Generar respuesta usando el nodo estándar
-    state = llm_response(state)
+    state = generate_response(state)
     
     # Post-procesar para asegurar tono amigable
     if state.get("response_text"):
@@ -161,8 +161,9 @@ def build_whatsapp_paciente_subgraph() -> StateGraph:
     from backend.agents.nodes import (
         classify_intent,
         combine_context,
-        nl_to_sql,
-        sql_exec,
+        generate_sql,
+        execute_sql,
+        generate_response,
     )
     
     # Agregar nodos del flujo (algunos específicos de paciente)
@@ -170,8 +171,8 @@ def build_whatsapp_paciente_subgraph() -> StateGraph:
     subgraph.add_node("validate_patient_consent", validate_patient_consent)
     subgraph.add_node("check_patient_permissions", check_patient_permissions)
     subgraph.add_node("combine_context", combine_context)
-    subgraph.add_node("nl_to_sql", nl_to_sql)
-    subgraph.add_node("sql_exec", sql_exec)
+    subgraph.add_node("generate_sql", generate_sql)
+    subgraph.add_node("execute_sql", execute_sql)
     subgraph.add_node("generate_patient_safe_response", generate_patient_safe_response)
     
     # Definir punto de entrada
@@ -181,9 +182,9 @@ def build_whatsapp_paciente_subgraph() -> StateGraph:
     subgraph.add_edge("classify_intent", "validate_patient_consent")
     subgraph.add_edge("validate_patient_consent", "check_patient_permissions")
     subgraph.add_edge("check_patient_permissions", "combine_context")
-    subgraph.add_edge("combine_context", "nl_to_sql")
-    subgraph.add_edge("nl_to_sql", "sql_exec")
-    subgraph.add_edge("sql_exec", "generate_patient_safe_response")
+    subgraph.add_edge("combine_context", "generate_sql")
+    subgraph.add_edge("generate_sql", "execute_sql")
+    subgraph.add_edge("execute_sql", "generate_patient_safe_response")
     subgraph.add_edge("generate_patient_safe_response", END)
     
     logger.info("✅ Subgrafo WhatsApp Paciente construido correctamente")
