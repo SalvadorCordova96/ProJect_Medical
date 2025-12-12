@@ -61,12 +61,16 @@ def get_checkpointer() -> PostgresSaver:
             
             # Crear el saver con la conexión
             _checkpointer_instance = PostgresSaver(pool)
-            
-            # Setup: Crear tabla de checkpoints si no existe
-            _checkpointer_instance.setup()
-            
+
+            # NOTE: En algunos entornos `PostgresSaver.setup()` ejecuta
+            # `CREATE INDEX CONCURRENTLY` dentro de una transacción,
+            # lo que falla en PostgreSQL. Ya creamos manualmente las
+            # tablas e índices necesarios fuera de la app (docker/psql),
+            # por lo que evitamos llamar a `setup()` aquí para prevenir
+            # el error "CREATE INDEX CONCURRENTLY cannot run inside a
+            # transaction block" durante el arranque.
             logger.info(
-                "✅ Checkpointer PostgreSQL inicializado correctamente"
+                "✅ Checkpointer PostgreSQL creado (setup omitido)."
                 f" (BD: clinica_auth_db)"
             )
             

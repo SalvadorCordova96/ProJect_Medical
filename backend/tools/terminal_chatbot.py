@@ -29,7 +29,7 @@ Ejemplos de consultas:
 import os
 import sys
 import asyncio
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 import argparse
 
@@ -42,10 +42,14 @@ try:
     from rich.markdown import Markdown
     from rich.table import Table
     from rich.prompt import Prompt
-    from rich.text import Text
-    RICH_AVAILABLE = True
+    rich_available = True
 except ImportError:
-    RICH_AVAILABLE = False
+    Console = None
+    Panel = None
+    Markdown = None
+    Table = None
+    Prompt = None
+    rich_available = False
     print("⚠️  Instala 'rich' para una mejor experiencia: pip install rich")
 
 from backend.agents.graph import run_agent
@@ -58,7 +62,7 @@ from backend.api.core.config import get_settings
 
 settings = get_settings()
 
-if RICH_AVAILABLE:
+if rich_available and Console is not None:
     console = Console()
 else:
     console = None
@@ -79,6 +83,7 @@ class Colors:
     END = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+    YELLOW = '\033[93m'
 
 
 # =============================================================================
@@ -87,7 +92,7 @@ class Colors:
 
 def print_welcome():
     """Mostrar mensaje de bienvenida."""
-    if RICH_AVAILABLE:
+    if console:
         welcome_text = """
 # 🦶 Bienvenido al Chatbot PodoSkin IA
 
@@ -114,7 +119,7 @@ Escribe **/exit** para salir.
 
 def print_help():
     """Mostrar ayuda de comandos."""
-    if RICH_AVAILABLE:
+    if console:
         help_text = """
 ## 📚 Comandos Disponibles
 
@@ -165,7 +170,7 @@ def print_help():
 
 def print_examples():
     """Mostrar ejemplos de consultas."""
-    if RICH_AVAILABLE:
+    if console:
         examples_text = """
 ## 💡 Ejemplos de Consultas
 
@@ -225,7 +230,7 @@ Muéstrame pacientes con tratamiento de onicomicosis
 
 def print_stats():
     """Mostrar estadísticas del sistema."""
-    if RICH_AVAILABLE:
+    if console:
         table = Table(title="📊 Estadísticas del Sistema", border_style="cyan")
         table.add_column("Métrica", style="cyan")
         table.add_column("Valor", style="green")
@@ -258,7 +263,7 @@ class ConversationHistory:
         self.history: List[Dict[str, Any]] = []
         self.max_size = max_size
     
-    def add(self, user_message: str, assistant_response: str, metadata: Optional[Dict] = None):
+    def add(self, user_message: str, assistant_response: str, metadata: Optional[Dict[str, Any]] = None):
         """Agregar intercambio al historial."""
         entry = {
             "timestamp": datetime.now(),
@@ -289,7 +294,7 @@ class ConversationHistory:
             print(f"\n{Colors.WARNING}No hay historial de conversación.{Colors.END}\n")
             return
         
-        if RICH_AVAILABLE:
+        if console:
             table = Table(title="📜 Historial de Conversación", border_style="blue")
             table.add_column("Hora", style="cyan", width=10)
             table.add_column("Usuario", style="green")
@@ -330,12 +335,21 @@ async def process_query(query: str, history: ConversationHistory) -> Dict[str, A
         context = history.get_context(last_n=3)
         
         # Ejecutar agente
+        # Nota: `run_agent` no acepta un parámetro `context` — en su lugar
+        # incluimos el contexto del historial directamente en la consulta
+        # para que el agente lo tenga en cuenta.
+        if context:
+            full_query = f"{query}\n\nContexto reciente:\n{context}"
+        else:
+            full_query = query
+
         result = await run_agent(
-            user_query=query,
+            user_query=full_query,
             user_id=1,  # Usuario admin por defecto para chatbot terminal
+            user_role="Admin",
             session_id=f"terminal_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             thread_id=None,  # Cada consulta es independiente por ahora
-            context={"conversation_history": context} if context else None
+            origin="terminal"
         )
         
         return result
@@ -354,7 +368,7 @@ def display_response(response: Dict[str, Any]):
     success = response.get("success", True)
     data = response.get("data", {})
     
-    if RICH_AVAILABLE:
+    if console:
         if success:
             console.print(Panel(
                 Markdown(message),
@@ -396,7 +410,7 @@ async def main_loop():
     while True:
         try:
             # Obtener entrada del usuario
-            if RICH_AVAILABLE:
+            if console and Prompt is not None:
                 user_input = Prompt.ask("\n[bold cyan]Tú[/bold cyan]", default="").strip()
             else:
                 user_input = input(f"\n{Colors.CYAN}Tú: {Colors.END}").strip()
@@ -410,7 +424,7 @@ async def main_loop():
                 command = user_input.lower()
                 
                 if command in ["/exit", "/quit", "/salir"]:
-                    if RICH_AVAILABLE:
+                    if console:
                         console.print("\n[bold yellow]👋 ¡Hasta luego![/bold yellow]\n")
                     else:
                         print(f"\n{Colors.WARNING}👋 ¡Hasta luego!{Colors.END}\n")
@@ -438,7 +452,7 @@ async def main_loop():
                 continue
             
             # Procesar consulta
-            if RICH_AVAILABLE:
+            if console:
                 with console.status("[bold green]Pensando...", spinner="dots"):
                     response = await process_query(user_input, history)
             else:
@@ -460,14 +474,14 @@ async def main_loop():
             )
             
         except KeyboardInterrupt:
-            if RICH_AVAILABLE:
+            if console:
                 console.print("\n\n[bold yellow]👋 Interrupción detectada. ¡Hasta luego![/bold yellow]\n")
             else:
                 print(f"\n\n{Colors.WARNING}👋 Interrupción detectada. ¡Hasta luego!{Colors.END}\n")
             break
         
         except Exception as e:
-            if RICH_AVAILABLE:
+            if console:
                 console.print(f"[bold red]Error inesperado: {e}[/bold red]")
             else:
                 print(f"{Colors.FAIL}Error inesperado: {e}{Colors.END}")
